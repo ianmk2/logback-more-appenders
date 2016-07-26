@@ -15,16 +15,16 @@
  */
 package ch.qos.logback.more.appenders;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Map.Entry;
-
-import org.fluentd.logger.FluentLogger;
-
 import ch.qos.logback.classic.pattern.CallerDataConverter;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.classic.spi.ThrowableProxyUtil;
 import ch.qos.logback.core.UnsynchronizedAppenderBase;
+import org.fluentd.logger.FluentLogger;
+import org.slf4j.Marker;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Map.Entry;
 
 public class DataFluentAppender extends UnsynchronizedAppenderBase<ILoggingEvent> {
 
@@ -72,13 +72,18 @@ public class DataFluentAppender extends UnsynchronizedAppenderBase<ILoggingEvent
         @Override
         protected void append(ILoggingEvent rawData) {
             final Map<String, Object> data = new HashMap<String, Object>();
+            if (rawData.getMarker() != null) {
+                Marker marker = rawData.getMarker();
+                if(marker instanceof MapMarker){
+                    data.putAll(((MapMarker)marker).toMap());
+                }else{
+                    data.put("marker", rawData.getMarker());
+                }
+            }
             data.put("message", rawData.getFormattedMessage());
             data.put("logger", rawData.getLoggerName());
             data.put("thread", rawData.getThreadName());
             data.put("level", rawData.getLevel());
-            if (rawData.getMarker() != null) {
-                data.put("marker", rawData.getMarker());
-            }
             if (rawData.hasCallerData()) {
                 data.put("caller", new CallerDataConverter().convert(rawData));
             }
