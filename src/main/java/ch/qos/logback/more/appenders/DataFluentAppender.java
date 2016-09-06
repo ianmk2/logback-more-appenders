@@ -19,9 +19,19 @@ import ch.qos.logback.classic.pattern.CallerDataConverter;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.classic.spi.ThrowableProxyUtil;
 import ch.qos.logback.core.UnsynchronizedAppenderBase;
+import com.fasterxml.jackson.core.JsonEncoding;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import net.logstash.logback.argument.StructuredArgument;
 import org.fluentd.logger.FluentLogger;
 import org.slf4j.Marker;
 
+import java.io.IOException;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -29,13 +39,16 @@ import java.util.Map.Entry;
 public class DataFluentAppender extends UnsynchronizedAppenderBase<ILoggingEvent> {
 
     private static final class FluentDaemonAppender extends DaemonAppender<ILoggingEvent> {
-
         private FluentLogger fluentLogger;
         private final String tag;
         private final String label;
         private final String remoteHost;
         private final int port;
         private final Map<String, String> additionalFields;
+        private final DateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ");
+        private final ObjectMapper objectMapper = new ObjectMapper();
+        private final JsonFactory factory = new JsonFactory();
+
 
         FluentDaemonAppender(String tag,
                 String label,
@@ -50,6 +63,7 @@ public class DataFluentAppender extends UnsynchronizedAppenderBase<ILoggingEvent
             this.remoteHost = remoteHost;
             this.port = port;
             this.additionalFields = additionalFields;
+
         }
 
         @Override
@@ -74,8 +88,31 @@ public class DataFluentAppender extends UnsynchronizedAppenderBase<ILoggingEvent
             final Map<String, Object> data = new HashMap<String, Object>();
             if (rawData.getMarker() != null) {
                 Marker marker = rawData.getMarker();
-                if(marker instanceof MapMarker){
-                    data.putAll(((MapMarker)marker).toMap());
+                if(marker instanceof MapMarker) {
+                    data.putAll(((MapMarker) marker).toMap());
+                }else if(marker instanceof StructuredArgument){
+                    StructuredArgument sa = (StructuredArgument)marker;
+                    ByteArrayInOutStream os = new ByteArrayInOutStream();
+                    try{
+                        JsonGenerator generator = factory.createGenerator(os, JsonEncoding.UTF8);
+                        generator.setCodec(objectMapper);
+                        generator.writeStartObject();
+                        sa.writeTo(generator);
+                        generator.writeEndObject();
+                        generator.close();
+
+                        Map<String, Object> map  = objectMapper.readValue(os.getInputStream(), new TypeReference<HashMap<String, Object>>() {
+                        });
+                        data.putAll(map);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    try{
+                        os.close();
+                    }catch (Exception e){
+
+                    }
+
                 }else{
                     data.put("marker", rawData.getMarker());
                 }
@@ -96,6 +133,8 @@ public class DataFluentAppender extends UnsynchronizedAppenderBase<ILoggingEvent
             for (Entry<String, String> entry : rawData.getMDCPropertyMap().entrySet()) {
                 data.put(entry.getKey(), entry.getValue());
             }
+
+            data.put("@timestamp", simpleDateFormat.format(new Date(rawData.getTimeStamp())));
             fluentLogger.log(label, data, rawData.getTimeStamp() / 1000);
         }
     }
